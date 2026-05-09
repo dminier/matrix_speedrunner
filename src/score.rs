@@ -83,21 +83,50 @@ fn save_csv(entries: &[ScoreEntry]) -> std::io::Result<()> {
     for e in entries {
         out.push_str(&entry_to_csv_row(e));
     }
-    fs::write(scores_csv_file(), out)
+    write_atomic(&scores_csv_file(), &out)
 }
 
 pub fn load() -> Vec<ScoreEntry> {
-    let Ok(s) = fs::read_to_string(scores_file()) else {
+    let path = scores_file();
+    let Ok(s) = fs::read_to_string(&path) else {
         return Vec::new();
     };
-    serde_json::from_str(&s).unwrap_or_default()
+    match serde_json::from_str(&s) {
+        Ok(v) => v,
+        Err(e) => {
+            // Sauvegarde le fichier corrompu avant de retourner un Vec vide,
+            // pour permettre une récupération manuelle. Sans ça, on perdrait
+            // silencieusement tous les scores du concours en cas de write
+            // partiel (kill -9, panne courant).
+            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let bak = path.with_extension(format!("json.bak.{ts}"));
+            let _ = fs::rename(&path, &bak);
+            eprintln!(
+                "[matrix_speedrunner] scores.json corrompu ({e}), sauvegardé en {}",
+                bak.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Écriture atomique : on écrit dans un fichier temporaire puis on rename.
+/// Sur POSIX et NTFS, `rename` est atomique → impossible de se retrouver avec
+/// un fichier final tronqué même si le process est tué pendant l'écriture.
+fn write_atomic(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|s| s.to_str()).unwrap_or("part")
+    ));
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, path)
 }
 
 pub fn save_all(entries: &[ScoreEntry]) -> std::io::Result<()> {
     let dir = data_dir();
     fs::create_dir_all(&dir)?;
     let s = serde_json::to_string_pretty(entries).expect("serialize scores");
-    fs::write(scores_file(), s)?;
+    write_atomic(&scores_file(), &s)?;
     // CSV est régénéré entièrement à chaque sauvegarde : c'est moins efficace
     // qu'un append, mais ça garde le fichier toujours cohérent même si
     // l'utilisateur édite manuellement le JSON.

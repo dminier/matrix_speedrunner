@@ -113,14 +113,19 @@ impl HackState {
 
         self.buffer.clear();
         self.last_complete_pulse = 0.18;
-        // Évite de retomber sur la même commande deux fois de suite.
+        // Évite de retomber sur la même commande deux fois de suite, mais
+        // borne le nombre de tentatives : si le pool ne contient qu'un seul
+        // item (ou si tous les pools sont vides et qu'on retombe toujours
+        // sur le même fallback), on accepte la répétition au bout de 5 essais
+        // pour éviter une boucle infinie qui freezerait le jeu.
         let prev = std::mem::take(&mut self.current);
-        loop {
+        for _ in 0..5 {
             let next = random_hack_command(self.diff);
             if next != prev {
                 self.current = next;
-                break;
+                return;
             }
         }
+        self.current = random_hack_command(self.diff);
     }
 }

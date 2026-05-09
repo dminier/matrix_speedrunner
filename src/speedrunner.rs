@@ -70,6 +70,14 @@ impl SpeedRunnerState {
         self.lives == 0 || self.elapsed >= self.time_limit
     }
 
+    /// Synchronise les dimensions internes avec celles du terminal. À appeler
+    /// à chaque frame depuis l'UI : sans ça, les commandes spawnent dans une
+    /// plage X figée à 80×24 qui ne correspond plus au terminal courant.
+    pub fn set_area(&mut self, w: u16, h: u16) {
+        self.area_w = w.max(1);
+        self.area_h = h.max(1);
+    }
+
     pub fn time_remaining(&self) -> f32 {
         (self.time_limit - self.elapsed).max(0.0)
     }

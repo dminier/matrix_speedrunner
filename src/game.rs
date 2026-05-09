@@ -88,6 +88,15 @@ impl Session {
         }
     }
 
+    /// Synchronise la taille de l'aire de jeu avec le terminal courant.
+    /// Pertinent uniquement pour Speed Runner (où le spawn dépend de la
+    /// largeur). Hack Time Attack ignore cette information.
+    pub fn set_area(&mut self, w: u16, h: u16) {
+        if let Session::SpeedRunner(s) = self {
+            s.set_area(w, h);
+        }
+    }
+
     pub fn type_char(&mut self, c: char) {
         match self {
             Session::SpeedRunner(s) => s.type_char(c),

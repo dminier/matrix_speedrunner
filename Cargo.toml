@@ -1,6 +1,6 @@
 [package]
 name = "matrix_speedrunner"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "CLI speedrunner & hacking time-attack mini-game with Matrix theme"
 license = "WTFPL"

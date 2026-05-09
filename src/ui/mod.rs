@@ -33,6 +33,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
         app.rain.render(area, buf);
     }
 
+    // Synchronise la taille de l'aire de jeu avec le terminal AVANT que le
+    // tick suivant ne tourne. Sans ça, les commandes du Speed Runner restent
+    // sur une plage X figée à 80×24.
+    if let Screen::Playing { session, .. } = &mut app.screen {
+        session.set_area(area.width, area.height);
+    }
+
     match &app.screen {
         Screen::Menu { selected } => {
             let r = center_rect(area, 70, 22);
