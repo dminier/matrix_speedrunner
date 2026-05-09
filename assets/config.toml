@@ -1,0 +1,145 @@
+# Matrix Speedrunner — configuration
+#
+# Ce fichier est embarqué dans le binaire à la compilation. Pour le surcharger
+# sans recompiler, copie-le ici :
+#
+#   Linux   : ~/.config/matrix_speedrunner/config.toml
+#   macOS   : ~/Library/Application Support/matrix_speedrunner/config.toml
+#   Windows : %APPDATA%\matrix_speedrunner\config.toml
+#
+# Sections optionnelles : si une section ou une clé manque, la valeur par
+# défaut embarquée est utilisée. Le fichier peut être réduit à seulement
+# les clés que tu veux changer.
+
+# ---------------------------------------------------------------------------
+# Durées des parties
+# ---------------------------------------------------------------------------
+
+[speedrunner]
+# Durée maximale d'une partie de Speed Runner, en secondes.
+# La partie se termine au premier des deux événements : 3 vies perdues OU
+# expiration du chrono. Mets une grande valeur (ex. 99999) pour désactiver
+# en pratique le timer et garder le mode score-attack pur "vies".
+time_limit_secs = 180
+
+[hack]
+# Durée d'une partie de Hack Time Attack, en secondes.
+time_limit_secs = 120
+
+# ---------------------------------------------------------------------------
+# Pools de commandes
+#
+# tier1/2/3 sont des paliers de difficulté progressive ; easter sont des
+# clins d'œil rares (~4-5% de chance d'apparaître).
+#
+# Tip : garde tier1 court (<= 15 chars), tier3 long (> 25 chars) pour que
+# le scoring pondéré par longueur soit pertinent.
+# ---------------------------------------------------------------------------
+
+[commands.speedrunner]
+tier1 = [
+    "ls",
+    "cd /",
+    "pwd",
+    "cat",
+    "grep",
+    "ps aux",
+    "top",
+    "df -h",
+    "du -sh",
+    "kill -9",
+    "ssh root",
+    "scp",
+    "whoami",
+    "uptime",
+]
+
+tier2 = [
+    "git commit",
+    "git rebase",
+    "docker ps",
+    "kubectl get pods",
+    "sudo apt update",
+    "awk '{print $1}'",
+    "sed -i",
+    "tail -f log",
+    "find . -name",
+    "chmod +x",
+    "systemctl restart",
+    "journalctl -u",
+]
+
+tier3 = [
+    "kubectl rollout restart deploy api",
+    "find . -name '*.rs' -exec rm {} +",
+    "terraform apply -auto-approve",
+    "docker compose up -d --build",
+    "git rebase -i HEAD~10",
+    "openssl req -newkey rsa:4096",
+]
+
+easter = [
+    "follow the white rabbit",
+    "there is no spoon",
+    "wake up neo",
+    "knock knock",
+    "free your mind",
+]
+
+[commands.hack]
+tier1 = [
+    "ls /etc",
+    "ps -ef",
+    "whoami",
+    "id",
+    "ssh neo@zion",
+    "ping mainframe",
+    "uname -a",
+    "netstat -an",
+    "kill -9 1",
+    "tail -f auth.log",
+    "cat /etc/passwd",
+    "history -c",
+    "su - root",
+    "echo $UID",
+]
+
+tier2 = [
+    "nmap -sV 192.168.1.1",
+    "sqlmap -u target --dbs",
+    "hydra -l root ssh://x",
+    "john --wordlist hash",
+    "tcpdump -i eth0",
+    "iptables -F",
+    "chmod 777 /etc/shadow",
+    "wget mainframe/payload",
+    "curl -X POST /auth",
+    "gdb -p $(pgrep agent)",
+    "echo 0 > /selinux/enforce",
+    "nc -lvnp 4444",
+    "strace -p 1337",
+    "openssl s_client -connect zion:443",
+]
+
+tier3 = [
+    "nmap -sS -p- -A 10.0.0.0/24",
+    "sqlmap -u 'http://t/?id=1' --dump",
+    "hashcat -m 1800 -a 0 hash rockyou.txt",
+    "msfconsole -x 'use multi/handler'",
+    "ssh -i id_rsa root@mainframe.matrix",
+    "openssl enc -aes-256-cbc -d -in payload",
+    "tcpdump -i eth0 'tcp port 22' -w cap.pcap",
+    "for h in $(cat targets); do nmap $h; done",
+    "echo \"' OR 1=1 -- \" | curl -d @- /login",
+    "find / -perm -4000 2>/dev/null",
+]
+
+easter = [
+    "decrypt /dev/matrix",
+    "bypass agent.smith",
+    "trace_route morpheus",
+    "follow_white_rabbit",
+    "free your mind",
+    "there is no spoon",
+    "i know kung fu",
+]

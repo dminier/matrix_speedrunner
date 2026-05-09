@@ -1,0 +1,128 @@
+name: Release
+
+# Déclenchement :
+#   - sur chaque tag commençant par "v" (ex: v0.1.0)
+#   - manuellement depuis l'onglet Actions (workflow_dispatch)
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # nécessaire pour créer la release et uploader les binaires
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x86_64
+            bin_name: matrix_speedrunner
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_suffix: windows-x86_64
+            bin_name: matrix_speedrunner.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Read crate version
+        id: ver
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Stage Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SUFFIX:  ${{ matrix.artifact_suffix }}
+          TARGET:  ${{ matrix.target }}
+          BIN:     ${{ matrix.bin_name }}
+        run: |
+          PKG="matrix_speedrunner-${VERSION}-${SUFFIX}"
+          mkdir -p "dist/${PKG}"
+          cp "target/${TARGET}/release/${BIN}" "dist/${PKG}/"
+          cp README.md "dist/${PKG}/"
+          strip "dist/${PKG}/${BIN}" || true
+          tar -C dist -czf "dist/${PKG}.tar.gz" "${PKG}"
+          ( cd dist && sha256sum "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256" )
+          rm -rf "dist/${PKG}"
+
+      - name: Stage Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SUFFIX:  ${{ matrix.artifact_suffix }}
+          TARGET:  ${{ matrix.target }}
+          BIN:     ${{ matrix.bin_name }}
+        run: |
+          $Pkg = "matrix_speedrunner-$env:VERSION-$env:SUFFIX"
+          New-Item -ItemType Directory -Force -Path "dist/$Pkg" | Out-Null
+          Copy-Item "target/$env:TARGET/release/$env:BIN" "dist/$Pkg/"
+          Copy-Item README.md "dist/$Pkg/"
+          @'
+          @echo off
+          "%~dp0matrix_speedrunner.exe"
+          pause
+          '@ | Set-Content -Encoding ASCII "dist/$Pkg/run.bat"
+          Compress-Archive -Path "dist/$Pkg" -DestinationPath "dist/$Pkg.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 "dist/$Pkg.zip").Hash.ToLower()
+          "$hash  $Pkg.zip" | Set-Content -Encoding ASCII "dist/$Pkg.zip.sha256"
+          Remove-Item -Recurse -Force "dist/$Pkg"
+
+      - name: Upload artifacts (intermediate)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_suffix }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # Ne publie automatiquement que sur les tags. Les exécutions manuelles
+    # (workflow_dispatch) construisent les artefacts mais ne publient pas.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh dist
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

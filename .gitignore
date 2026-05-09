@@ -1,0 +1,22 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Local data (scores du dev, pas du concours)
+scores.json
+scores.csv
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Vault Obsidian local — l'utilisateur final regénère le sien
+/.vault/.obsidian/workspace*
+/.vault/.obsidian/cache
+/.vault/.trash/
+/dist
