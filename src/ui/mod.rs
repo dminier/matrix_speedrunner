@@ -13,6 +13,7 @@ mod game_over;
 mod identity;
 mod menu;
 mod play;
+mod rules;
 mod player_detail;
 mod players;
 mod scores;
@@ -45,6 +46,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             let r = center_rect(area, 70, 22);
             clear_rect(f, r);
             menu::render_menu(f, r, *selected);
+        }
+        Screen::Rules { scroll } => {
+            let r = center_rect(area, 80, 24);
+            clear_rect(f, r);
+            rules::render_rules(f, r, *scroll);
         }
         Screen::EnterIdentity { mode, name, contact, field, error } => {
             let r = center_rect(area, 64, 16);

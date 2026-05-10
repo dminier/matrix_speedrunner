@@ -31,17 +31,15 @@ impl GameMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            GameMode::SpeedRunner => "Speed Runner",
-            GameMode::HackTimeAttack => "Hack Time Attack",
+            GameMode::SpeedRunner => "Jouer à Speed Runner",
+            GameMode::HackTimeAttack => "Jouer à Hack Time Attack",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
-            GameMode::SpeedRunner =>
-                "Tape les commandes qui tombent avant qu'elles ne touchent le sol. 3 vies, score-attack.",
-            GameMode::HackTimeAttack =>
-                "Hack la Matrice : tape un maximum de commandes en 2 minutes. Score pondéré par longueur.",
+            GameMode::SpeedRunner => "",
+            GameMode::HackTimeAttack => "",
         }
     }
 }

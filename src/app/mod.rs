@@ -16,7 +16,7 @@ use crate::rain::Rain;
 use crate::score::{self, ScoreEntry};
 use crate::ui;
 
-pub use screen::{IdField, Screen};
+pub use screen::{menu_items, IdField, Screen};
 
 use handlers::Action;
 

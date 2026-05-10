@@ -1,7 +1,12 @@
+//! Persistance des scores : un unique fichier `score.xlsx` (Office Excel),
+//! placé **dans le même dossier que l'exécutable**. Pas d'autre fichier local.
+
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::{DateTime, Local};
+use calamine::{open_workbook_auto, Data, Reader};
+use chrono::{DateTime, Local, TimeZone};
+use rust_xlsxwriter::{Format, FormatBorder, Workbook};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,124 +25,169 @@ pub struct ScoreEntry {
     pub timestamp: DateTime<Local>,
 }
 
-pub fn data_dir() -> PathBuf {
-    if let Some(d) = dirs::data_dir() {
-        d.join("matrix_speedrunner")
-    } else {
-        PathBuf::from(".")
-    }
+/// Dossier qui contient l'exécutable courant (fallback : répertoire courant).
+fn exe_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Chemin absolu du fichier de scores Excel.
 pub fn scores_file() -> PathBuf {
-    data_dir().join("scores.json")
+    exe_dir().join("score.xlsx")
 }
 
-pub fn scores_csv_file() -> PathBuf {
-    data_dir().join("scores.csv")
-}
-
-// CRLF (RFC 4180) pour qu'Excel sous Windows découpe correctement les lignes.
-const CSV_HEADER: &str =
-    "timestamp,name,contact,mode,difficulty,score,wpm,max_combo,items_done,duration_secs\r\n";
-// BOM UTF-8 : sans lui, Excel français interprète le fichier en Windows-1252
-// et casse les accents (é è ç) et les caractères non-ASCII.
-const UTF8_BOM: &str = "\u{FEFF}";
-
-fn csv_escape(s: &str) -> String {
-    // Selon RFC 4180 : on quote dès qu'il y a un séparateur, un guillemet,
-    // un retour ligne ou un espace en bord. Les " internes sont doublés.
-    let needs_quote = s
-        .chars()
-        .any(|c| c == ',' || c == '"' || c == '\n' || c == '\r' || c == ';');
-    if needs_quote {
-        let escaped = s.replace('"', "\"\"");
-        format!("\"{escaped}\"")
-    } else {
-        s.to_string()
-    }
-}
-
-fn entry_to_csv_row(e: &ScoreEntry) -> String {
-    format!(
-        "{},{},{},{},{},{},{},{},{},{}\r\n",
-        // RFC3339 — Excel/LibreOffice/Pandas le parsent nativement.
-        e.timestamp.to_rfc3339(),
-        csv_escape(&e.name),
-        csv_escape(&e.contact),
-        csv_escape(&e.mode),
-        csv_escape(&e.difficulty),
-        e.score,
-        e.wpm,
-        e.max_combo,
-        e.items_done,
-        e.duration_secs,
-    )
-}
-
-fn save_csv(entries: &[ScoreEntry]) -> std::io::Result<()> {
-    let dir = data_dir();
-    fs::create_dir_all(&dir)?;
-    let mut out = String::with_capacity(UTF8_BOM.len() + CSV_HEADER.len() + entries.len() * 80);
-    out.push_str(UTF8_BOM);
-    out.push_str(CSV_HEADER);
-    for e in entries {
-        out.push_str(&entry_to_csv_row(e));
-    }
-    write_atomic(&scores_csv_file(), &out)
-}
+const HEADERS: [&str; 10] = [
+    "timestamp",
+    "name",
+    "contact",
+    "mode",
+    "difficulty",
+    "score",
+    "wpm",
+    "max_combo",
+    "items_done",
+    "duration_secs",
+];
 
 pub fn load() -> Vec<ScoreEntry> {
     let path = scores_file();
-    let Ok(s) = fs::read_to_string(&path) else {
+    if !path.exists() {
         return Vec::new();
-    };
-    match serde_json::from_str(&s) {
-        Ok(v) => v,
+    }
+    let mut wb = match open_workbook_auto(&path) {
+        Ok(wb) => wb,
         Err(e) => {
-            // Sauvegarde le fichier corrompu avant de retourner un Vec vide,
-            // pour permettre une récupération manuelle. Sans ça, on perdrait
-            // silencieusement tous les scores du concours en cas de write
-            // partiel (kill -9, panne courant).
-            let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            let bak = path.with_extension(format!("json.bak.{ts}"));
-            let _ = fs::rename(&path, &bak);
-            eprintln!(
-                "[matrix_speedrunner] scores.json corrompu ({e}), sauvegardé en {}",
-                bak.display()
-            );
-            Vec::new()
+            eprintln!("[matrix_speedrunner] {} illisible : {e}", path.display());
+            return Vec::new();
         }
+    };
+    let sheet_name = wb
+        .sheet_names()
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "Scores".to_string());
+    let range = match wb.worksheet_range(&sheet_name) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[matrix_speedrunner] feuille {sheet_name} : {e}");
+            return Vec::new();
+        }
+    };
+    let mut out = Vec::new();
+    for row in range.rows().skip(1) {
+        // Saute les lignes incomplètes ou en-tête mal placée.
+        if row.len() < HEADERS.len() {
+            continue;
+        }
+        let ts = parse_timestamp(&row[0]);
+        let entry = ScoreEntry {
+            timestamp: ts,
+            name: cell_string(&row[1]),
+            contact: cell_string(&row[2]),
+            mode: cell_string(&row[3]),
+            difficulty: cell_string(&row[4]),
+            score: cell_u32(&row[5]),
+            wpm: cell_u32(&row[6]),
+            max_combo: cell_u32(&row[7]),
+            items_done: cell_u32(&row[8]),
+            duration_secs: cell_u32(&row[9]),
+        };
+        out.push(entry);
+    }
+    out
+}
+
+fn cell_string(c: &Data) -> String {
+    match c {
+        Data::String(s) => s.clone(),
+        Data::Float(f) => f.to_string(),
+        Data::Int(i) => i.to_string(),
+        Data::Bool(b) => b.to_string(),
+        Data::DateTime(dt) => dt.to_string(),
+        Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
+        Data::Empty | Data::Error(_) => String::new(),
     }
 }
 
-/// Écriture atomique : on écrit dans un fichier temporaire puis on rename.
-/// Sur POSIX et NTFS, `rename` est atomique → impossible de se retrouver avec
-/// un fichier final tronqué même si le process est tué pendant l'écriture.
-fn write_atomic(path: &std::path::Path, content: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension().and_then(|s| s.to_str()).unwrap_or("part")
-    ));
-    fs::write(&tmp, content)?;
+fn cell_u32(c: &Data) -> u32 {
+    match c {
+        Data::Int(i) => (*i).max(0) as u32,
+        Data::Float(f) => f.round().max(0.0) as u32,
+        Data::String(s) => s.trim().parse().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn parse_timestamp(c: &Data) -> DateTime<Local> {
+    match c {
+        Data::DateTimeIso(s) | Data::String(s) => DateTime::parse_from_rfc3339(s)
+            .map(|dt| dt.with_timezone(&Local))
+            .unwrap_or_else(|_| Local::now()),
+        Data::DateTime(dt) => {
+            // Excel datetime sérialisé en jours depuis 1900-01-01.
+            let secs = ((dt.as_f64() - 25569.0) * 86400.0) as i64;
+            Local.timestamp_opt(secs, 0).single().unwrap_or_else(Local::now)
+        }
+        _ => Local::now(),
+    }
+}
+
+/// Réécriture atomique : écrit dans un .tmp puis rename.
+fn write_atomic_xlsx(path: &std::path::Path, entries: &[ScoreEntry]) -> std::io::Result<()> {
+    let tmp = path.with_extension("xlsx.tmp");
+    let mut wb = Workbook::new();
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_background_color("#003300")
+        .set_font_color("#00FF41")
+        .set_border(FormatBorder::Thin);
+    let ws = wb
+        .add_worksheet()
+        .set_name("Scores")
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    for (col, h) in HEADERS.iter().enumerate() {
+        ws.write_string_with_format(0, col as u16, *h, &header_fmt)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+    }
+
+    for (i, e) in entries.iter().enumerate() {
+        let row = (i + 1) as u32;
+        // Timestamp en chaîne RFC 3339 pour rester lisible et trier alphabétiquement.
+        ws.write_string(row, 0, e.timestamp.to_rfc3339()).ok();
+        ws.write_string(row, 1, &e.name).ok();
+        ws.write_string(row, 2, &e.contact).ok();
+        ws.write_string(row, 3, &e.mode).ok();
+        ws.write_string(row, 4, &e.difficulty).ok();
+        ws.write_number(row, 5, e.score as f64).ok();
+        ws.write_number(row, 6, e.wpm as f64).ok();
+        ws.write_number(row, 7, e.max_combo as f64).ok();
+        ws.write_number(row, 8, e.items_done as f64).ok();
+        ws.write_number(row, 9, e.duration_secs as f64).ok();
+    }
+
+    // Largeurs raisonnables.
+    let widths = [25.0, 18.0, 24.0, 18.0, 12.0, 8.0, 8.0, 11.0, 12.0, 14.0];
+    for (col, w) in widths.iter().enumerate() {
+        ws.set_column_width(col as u16, *w).ok();
+    }
+
+    wb.save(&tmp)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     fs::rename(&tmp, path)
 }
 
 pub fn save_all(entries: &[ScoreEntry]) -> std::io::Result<()> {
-    let dir = data_dir();
-    fs::create_dir_all(&dir)?;
-    let s = serde_json::to_string_pretty(entries).expect("serialize scores");
-    write_atomic(&scores_file(), &s)?;
-    // CSV est régénéré entièrement à chaque sauvegarde : c'est moins efficace
-    // qu'un append, mais ça garde le fichier toujours cohérent même si
-    // l'utilisateur édite manuellement le JSON.
-    save_csv(entries)
+    let path = scores_file();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    write_atomic_xlsx(&path, entries)
 }
 
 /// Identité normalisée pour regrouper les runs d'un même joueur.
-/// Le **contact** (email ou téléphone) est la clé : un même participant peut
-/// saisir des variations de pseudo entre deux runs, mais son contact reste
-/// stable. On normalise par trim + lowercase + on retire les espaces internes
-/// (utile pour les numéros de tel saisis avec des espaces ou points).
 pub fn identity_key(_name: &str, contact: &str) -> String {
     contact
         .trim()
@@ -156,10 +206,6 @@ pub struct PlayerSummary {
     pub last_played: chrono::DateTime<chrono::Local>,
 }
 
-/// Agrège les ScoreEntry par identité (clé = contact normalisé).
-/// Trié par meilleur score décroissant. Le nom retenu pour l'affichage est
-/// celui du run le plus récent — un joueur qui change de pseudo verra son
-/// dernier pseudo affiché.
 pub fn aggregate_players(entries: &[ScoreEntry]) -> Vec<PlayerSummary> {
     use std::collections::HashMap;
     let mut by_key: HashMap<String, PlayerSummary> = HashMap::new();
@@ -174,7 +220,6 @@ pub fn aggregate_players(entries: &[ScoreEntry]) -> Vec<PlayerSummary> {
                 }
                 if e.timestamp > p.last_played {
                     p.last_played = e.timestamp;
-                    // le nom et le contact "officiels" sont ceux du dernier run
                     p.name = e.name.clone();
                     p.contact = e.contact.clone();
                 }
@@ -193,8 +238,6 @@ pub fn aggregate_players(entries: &[ScoreEntry]) -> Vec<PlayerSummary> {
     v
 }
 
-/// Tous les runs d'un joueur (clé = contact normalisé),
-/// triés du plus ancien au plus récent.
 pub fn runs_for_player<'a>(entries: &'a [ScoreEntry], key: &str) -> Vec<&'a ScoreEntry> {
     let mut v: Vec<_> = entries
         .iter()

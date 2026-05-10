@@ -18,8 +18,11 @@ pub enum IdField {
 
 pub enum Screen {
     Menu {
-        /// 0..N modes, puis Scores, puis Quit.
+        /// Index dans la liste retournée par [`menu_items`] — source de vérité unique.
         selected: usize,
+    },
+    Rules {
+        scroll: u16,
     },
     EnterIdentity {
         mode: GameMode,
@@ -58,6 +61,46 @@ pub enum Screen {
         entries: Vec<ScoreEntry>,
         key: String,
     },
+}
+
+/// Item sélectionnable du menu principal. Source de vérité unique pour
+/// l'ordre, les libellés et les descriptions affichés et le routing handler.
+#[derive(Clone, Copy)]
+pub enum MenuItem {
+    Mode(GameMode),
+    Rules,
+    Scores,
+    Quit,
+}
+
+impl MenuItem {
+    pub fn label(self) -> &'static str {
+        match self {
+            MenuItem::Mode(m) => m.label(),
+            MenuItem::Rules => "Rules",
+            MenuItem::Scores => "Scores",
+            MenuItem::Quit => "Quit",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            MenuItem::Mode(m) => m.description(),
+            MenuItem::Rules => "Règles du jeu, contrôles et calcul du score.",
+            MenuItem::Scores => "Tableau des scores du concours, par jour.",
+            MenuItem::Quit => "Sortir de la Matrice.",
+        }
+    }
+}
+
+/// Construit la liste ordonnée des items du menu : modes de jeu, puis Rules,
+/// Scores, Quit. Appelée par le rendu et par le handler clavier.
+pub fn menu_items() -> Vec<MenuItem> {
+    let mut v: Vec<MenuItem> = GameMode::ALL.iter().map(|&m| MenuItem::Mode(m)).collect();
+    v.push(MenuItem::Rules);
+    v.push(MenuItem::Scores);
+    v.push(MenuItem::Quit);
+    v
 }
 
 /// Validation légère : email (`@` + `.`, ≥ 5 chars) ou téléphone (≥ 8 chiffres).

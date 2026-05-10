@@ -4,11 +4,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::screen::{valid_contact, IdField, Identity, Screen};
+use crate::app::screen::{menu_items, valid_contact, IdField, Identity, MenuItem, Screen};
 use crate::game::{Difficulty, GameMode, Session};
 use crate::score;
-
-const MENU_LEN: usize = GameMode::ALL.len() + 2; // modes + Scores + Quit
 
 /// Résultat d'un handler : transition d'écran, demande de quitter, ou rien.
 pub enum Action {
@@ -20,6 +18,7 @@ pub enum Action {
 pub fn handle(screen: &mut Screen, key: KeyEvent) -> Action {
     match screen {
         Screen::Menu { selected } => on_menu(selected, key),
+        Screen::Rules { scroll } => on_rules(scroll, key),
         Screen::EnterIdentity { mode, name, contact, field, error } => {
             on_identity(*mode, name, contact, field, error, key)
         }
@@ -37,6 +36,7 @@ pub fn handle(screen: &mut Screen, key: KeyEvent) -> Action {
 }
 
 fn on_menu(selected: &mut usize, key: KeyEvent) -> Action {
+    let items = menu_items();
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
         KeyCode::Up => {
@@ -44,29 +44,53 @@ fn on_menu(selected: &mut usize, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Down => {
-            *selected = (*selected + 1).min(MENU_LEN - 1);
+            *selected = (*selected + 1).min(items.len() - 1);
             Action::None
         }
-        KeyCode::Enter => {
-            let n_modes = GameMode::ALL.len();
-            if *selected < n_modes {
-                let mode = GameMode::ALL[*selected];
-                Action::Goto(Screen::EnterIdentity {
-                    mode,
-                    name: String::new(),
-                    contact: String::new(),
-                    field: IdField::Name,
-                    error: None,
-                })
-            } else if *selected == n_modes {
-                Action::Goto(Screen::Scores {
-                    entries: score::load(),
-                    scroll: 0,
-                    filter: None,
-                })
-            } else {
-                Action::Quit
-            }
+        KeyCode::Enter => match items.get(*selected).copied() {
+            Some(MenuItem::Mode(mode)) => Action::Goto(Screen::EnterIdentity {
+                mode,
+                name: String::new(),
+                contact: String::new(),
+                field: IdField::Name,
+                error: None,
+            }),
+            Some(MenuItem::Rules) => Action::Goto(Screen::Rules { scroll: 0 }),
+            Some(MenuItem::Scores) => Action::Goto(Screen::Scores {
+                entries: score::load(),
+                scroll: 0,
+                filter: None,
+            }),
+            Some(MenuItem::Quit) | None => Action::Quit,
+        },
+        _ => Action::None,
+    }
+}
+
+fn on_rules(scroll: &mut u16, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Backspace => {
+            Action::Goto(Screen::Menu { selected: 0 })
+        }
+        KeyCode::Up => {
+            *scroll = scroll.saturating_sub(1);
+            Action::None
+        }
+        KeyCode::Down => {
+            *scroll = scroll.saturating_add(1);
+            Action::None
+        }
+        KeyCode::PageUp => {
+            *scroll = scroll.saturating_sub(8);
+            Action::None
+        }
+        KeyCode::PageDown => {
+            *scroll = scroll.saturating_add(8);
+            Action::None
+        }
+        KeyCode::Home => {
+            *scroll = 0;
+            Action::None
         }
         _ => Action::None,
     }
